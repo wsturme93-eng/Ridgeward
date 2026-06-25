@@ -454,12 +454,16 @@ async function boot(){
   if(SUPA_URL&&window.supabase){try{sb=window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});SUPA_OK=true;}catch(e){SUPA_OK=false;}}
   const av=$('#appVer');if(av)av.textContent='v'+APP_VERSION+(SUPA_OK?' \u00b7 cloud':' \u00b7 local');
   if(SUPA_OK){
+    const isRecovery=/type=recovery/.test(window.location.hash||'');
     sb.auth.onAuthStateChange((evt,session)=>{
+      if(evt==='PASSWORD_RECOVERY'){showSetPassword(true);return;}
       if(session&&!activeEntity){initApp();}
       else if(!session){activeEntity=null;showLogin();}
     });
     const{data:{session}}=await sb.auth.getSession();
-    if(session)await initApp(); else showLogin();
+    if(isRecovery){showSetPassword(true);}
+    else if(session)await initApp();
+    else showLogin();
   } else {
     await Store.load();render();
   }
@@ -581,6 +585,33 @@ function showLogin(msg){
     $('#lg_msg').textContent=error?error.message:'\u2713 If that email has an account, a reset link is on its way.';};
 }
 function hideLogin(){const o=$('#loginOverlay');if(o)o.remove();}
+function showSetPassword(fromRecovery){
+  hideLogin();
+  const ov=document.createElement('div');ov.id='loginOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--paper,#f3efe2);padding:20px';
+  ov.innerHTML=`<div style="max-width:380px;width:100%;background:var(--card,#fff);border:1px solid #e2dcca;border-radius:16px;padding:28px;box-shadow:0 10px 40px rgba(0,0,0,.12)">
+     <img src="${LOGO_GREEN}" alt="Ridgeward" style="height:38px;display:block;margin-bottom:12px">
+     <h2 style="margin:6px 0 4px;font-size:22px">${fromRecovery?'Set your password':'Change password'}</h2>
+     <p style="color:#5b5b52;font-size:13px;margin:0 0 16px">${fromRecovery?'Choose a password so you can sign in directly next time \u2014 no reset link needed.':'Enter a new password for your account.'}</p>
+     <input id="sp_pw" type="password" autocomplete="new-password" placeholder="New password (min 6 characters)" style="width:100%;padding:12px;border:1px solid #cfc8b5;border-radius:9px;font-size:15px;margin-bottom:10px">
+     <input id="sp_pw2" type="password" autocomplete="new-password" placeholder="Confirm password" style="width:100%;padding:12px;border:1px solid #cfc8b5;border-radius:9px;font-size:15px;margin-bottom:10px">
+     <button id="sp_btn" style="width:100%;padding:12px;border:0;border-radius:9px;background:#143A2E;color:#fff;font-size:15px;font-weight:700;cursor:pointer">Save password</button>
+     <div id="sp_msg" style="font-size:12.5px;color:#5b5b52;margin-top:12px;text-align:center"></div>
+     ${fromRecovery?'':'<div style="text-align:center;margin-top:12px"><a href="#" id="sp_cancel" style="font-size:12.5px;color:#69756b">Cancel</a></div>'}
+   </div>`;
+  document.body.appendChild(ov);
+  const save=async()=>{const pw=$('#sp_pw').value,pw2=$('#sp_pw2').value;
+    if(!pw||pw.length<6){$('#sp_msg').textContent='Password must be at least 6 characters.';return;}
+    if(pw!==pw2){$('#sp_msg').textContent='Passwords don\u2019t match.';return;}
+    $('#sp_btn').disabled=true;$('#sp_btn').textContent='Saving\u2026';
+    try{const{error}=await sb.auth.updateUser({password:pw});if(error)throw error;
+      if(fromRecovery){try{history.replaceState(null,'',window.location.pathname);}catch(_){}hideLogin();activeEntity=null;await initApp();toast('\u2713 Password set');}
+      else{hideLogin();toast('\u2713 Password updated');}
+    }catch(e){$('#sp_msg').textContent=e.message||'Could not set password';$('#sp_btn').disabled=false;$('#sp_btn').textContent='Save password';}};
+  $('#sp_btn').onclick=save;
+  $('#sp_pw2').addEventListener('keydown',e=>{if(e.key==='Enter')save();});
+  const c=$('#sp_cancel');if(c)c.onclick=e=>{e.preventDefault();hideLogin();};
+}
 function showEntitySetup(){
   hideLogin();
   const ov=document.createElement('div');ov.id='loginOverlay';
@@ -1709,11 +1740,11 @@ function openData(){
     const owner=myRole==='owner';
     showModal(`<header><h3>Account, data &amp; sharing</h3><button class="btn ghost sm" onclick="closeModal()">\u2715</button></header>
      <div class="body">
-       <div class="dataline"><div><b>Signed in</b><div class="t-sub">${myEmail||'\u2014'} \u00b7 role: <b>${myRole}</b></div></div><button class="btn sm" id="d_signout">Sign out</button></div>
+       <div class="dataline"><div><b>Signed in</b><div class="t-sub">${myEmail||'\u2014'} \u00b7 role: <b>${myRole}</b></div></div><div style="display:flex;gap:6px"><button class="btn sm" id="d_pw">Change password</button><button class="btn sm" id="d_signout">Sign out</button></div></div>
        <div class="dataline"><div><b>This entity</b><div class="t-sub">${Store.counts()} \u00b7 live in Supabase</div></div><span class="savetag">\u2713 cloud-synced</span></div>
        <div class="note blue">Your data lives in your Supabase database and syncs live to everyone you share it with. Edits you make appear on their screens automatically.</div>
        ${owner?`<div class="eyebrow" style="margin-top:6px">Share this entity</div>
-         <div class="note">The person must sign in here once first (so an account exists). They\u2019ll then receive an <b>invitation to accept</b> before they can see anything. Editors edit the same data as you; viewers are read-only.</div>
+         <div class="note">The person must <b>create an account</b> here once first (email + a password they choose). Then add their email below \u2014 they\u2019ll get an <b>invitation to accept</b> before they can see anything. Editors edit the same data as you; viewers are read-only.</div>
          <div class="row3"><label style="grid-column:span 2"><span class="eyebrow">Their email</span><input id="sh_email" type="email" placeholder="name@example.com"></label>
            <label><span class="eyebrow">Role</span><select id="sh_role"><option value="editor">Editor</option><option value="viewer">Viewer</option></select></label></div>
          <div style="display:flex;justify-content:space-between;align-items:center"><div id="sh_members" class="t-sub">\u00a0</div><button class="btn sm primary" id="sh_send">Share</button></div>`:`<div class="note">You have <b>${myRole}</b> access to this entity, shared by its owner.</div>`}
@@ -1725,6 +1756,7 @@ function openData(){
      </div>
      <footer><div></div><button class="btn primary" onclick="closeModal()">Done</button></footer>`,true);
     $('#d_signout').onclick=()=>signOut();
+    const _dpw=$('#d_pw');if(_dpw)_dpw.onclick=()=>showSetPassword(false);
     $('#d_backup').onclick=()=>{const blob=new Blob([JSON.stringify(Store.state,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='station-data.json';a.click();URL.revokeObjectURL(u);toast('Backup downloaded');};
     $('#d_xlsx').onclick=()=>exportXlsx();
     if(owner){
